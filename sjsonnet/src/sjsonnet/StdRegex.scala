@@ -1,9 +1,13 @@
 package sjsonnet
 
+import scala.reflect.ClassTag
+
 import sjsonnet.Expr.Member.Visibility
 import sjsonnet.Val.Obj
 
 object StdRegex {
+  private[this] implicit val valStrClassTag: ClassTag[Val.Str] = ClassTag.apply[Val.Str](classOf[Val.Str])
+
   private final def regexPartialMatch(pos: Position, pattern: String, str: String): Val = {
     val compiledPattern = Platform.getPatternFromCache(pattern)
     val matcher = compiledPattern.matcher(str)

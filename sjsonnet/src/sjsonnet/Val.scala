@@ -84,6 +84,10 @@ object PrettyNamed{
 }
 object Val{
 
+  private[this] implicit val stringClassTag: ClassTag[String] = ClassTag.apply[String](classOf[String])
+  private[this] implicit val lazyClassTag: ClassTag[Lazy] = ClassTag.apply[Lazy](classOf[Lazy])
+  private[this] implicit val valClassTag: ClassTag[Val] = ClassTag.apply[Val](classOf[Val])
+
   abstract class Literal extends Val with Expr
   abstract class Bool extends Literal {
     override def asBoolean: Boolean = this.isInstanceOf[True]

@@ -8,6 +8,7 @@ import sjsonnet.Expr.Member.Visibility
 
 import scala.collection.Searching._
 import scala.collection.mutable
+import scala.reflect.ClassTag
 
 /**
   * The Jsonnet standard library, `std`, with each builtin function implemented
@@ -15,6 +16,15 @@ import scala.collection.mutable
   * logic automatically
   */
 class Std(private val additionalNativeFunctions: Map[String, Val.Builtin] = Map.empty) {
+
+  private[this] implicit val valClassTag: ClassTag[Val] = ClassTag.apply[Val](classOf[Val])
+  private[this] implicit val exprClassTag: ClassTag[Expr] = ClassTag.apply[Expr](classOf[Expr])
+  private[this] implicit val valNumClassTag: ClassTag[Val.Num] = ClassTag.apply[Val.Num](classOf[Val.Num])
+  private[this] implicit val valStrClassTag: ClassTag[Val.Str] = ClassTag.apply[Val.Str](classOf[Val.Str])
+  private[this] implicit val valObjClassTag: ClassTag[Val.Obj] = ClassTag.apply[Val.Obj](classOf[Val.Obj])
+  private[this] implicit val lazyClassTag: ClassTag[Lazy] = ClassTag.apply[Lazy](classOf[Lazy])
+  private[this] implicit val stringClassTag: ClassTag[String] = ClassTag.apply[String](classOf[String])
+
   private val dummyPos: Position = new Position(null, 0)
   private val emptyLazyArray = new Array[Lazy](0)
   private val leadingWhiteSpacePattern = Platform.getPatternFromCache("^[ \t\n\f\r\u0085\u00A0']+")

@@ -5,7 +5,7 @@ import sjsonnet.Expr.Member.Visibility
 import ujson.Value
 
 import scala.annotation.tailrec
-import scala.collection.mutable
+import scala.reflect.ClassTag
 
 /**
   * Recursively walks the [[Expr]] trees to convert them into into [[Val]]
@@ -29,6 +29,15 @@ class Evaluator(resolver: CachedResolver,
   def materialize(v: Val): Value = Materializer.apply(v)
   val cachedImports = collection.mutable.HashMap.empty[Path, Val]
   var tailstrict: Boolean = false
+
+  private[this] implicit val exprBindClassTag: ClassTag[Expr.Bind] = ClassTag.apply[Expr.Bind](classOf[Expr.Bind])
+  private[this] implicit val valClassTag: ClassTag[Val] = ClassTag.apply[Val](classOf[Val])
+  private[this] implicit val valFuncClassTag: ClassTag[Val.Func] = ClassTag.apply[Val.Func](classOf[Val.Func])
+  private[this] implicit val valNumClassTag: ClassTag[Val.Num] = ClassTag.apply[Val.Num](classOf[Val.Num])
+  private[this] implicit val valStrClassTag: ClassTag[Val.Str] = ClassTag.apply[Val.Str](classOf[Val.Str])
+  private[this] implicit val valObjClassTag: ClassTag[Val.Obj] = ClassTag.apply[Val.Obj](classOf[Val.Obj])
+  private[this] implicit val valScopeClassTag: ClassTag[ValScope] = ClassTag.apply[ValScope](classOf[ValScope])
+  private[this] implicit val lazyClassTag: ClassTag[Lazy] = ClassTag.apply[Lazy](classOf[Lazy])
 
   override def visitExpr(e: Expr)(implicit scope: ValScope): Val = try {
     e match {
