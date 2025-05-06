@@ -133,6 +133,11 @@ object StdMergePatchTests extends TestSuite {
     }
 
     test("lazy evaluation of LHS members") {
+      // An erroring target _object_ which is ignored because the patch isn't an object:
+      eval(
+        """std.mergePatch(error "should not error", 42)"""
+      ) ==> ujson.Num(42)
+
       // An erroring target field which doesn't merge with any patch fields.
       // This shouldn't error because we should avoid eager evaluation of unmerged target fields:
       eval(
