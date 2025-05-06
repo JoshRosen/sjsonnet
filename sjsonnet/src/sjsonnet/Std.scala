@@ -907,6 +907,126 @@ class Std(
       )
   }
 
+  private object MergePatch extends Val.Builtin2("mergePatch", "target", "patch") {
+    def evalRhs(target: Lazy, patch: Lazy, ev: EvalScope, pos: Position): Val = {
+      val mergePosition = pos
+      def createLazyMember(v: => Val) = new Val.Obj.Member(false, Visibility.Normal) {
+        def invoke(self: Val.Obj, sup: Val.Obj, fs: FileScope, ev: EvalScope): Val = v
+      }
+      def recPair(l: Val, r: Val): Val = (l, r) match {
+        case (l: Val.Obj, r: Val.Obj) =>
+          val keys: Array[String] = distinctKeys(l.visibleKeyNames, r.visibleKeyNames)
+          val kvs: Array[(String, Val.Obj.Member)] =
+            new Array[(String, Val.Obj.Member)](keys.length)
+          var kvsIdx = 0
+          var i = 0
+          while (i < keys.length) {
+            val key = keys(i)
+            val rValue = if (r.containsVisibleKey(key)) r.valueRaw(key, r, pos)(ev) else null
+            if (!rValue.isInstanceOf[Val.Null]) { // if we are not removing the key
+              if (l.containsVisibleKey(key)) {
+                if (rValue == null) {
+                  // Preserve the LHS/target value:
+                  kvs(kvsIdx) = (key, createLazyMember(l.valueRaw(key, l, pos)(ev)))
+                } else {
+                  // Below, lValue is lazy so that we can short circuit and skip its
+                  // evaluation when rValue is not an object:
+                  lazy val lValue = l.valueRaw(key, l, pos)(ev)
+                  if (rValue.isInstanceOf[Val.Obj] && lValue.isInstanceOf[Val.Obj]) {
+                    // Recursively merge objects:
+                    kvs(kvsIdx) = (key, createLazyMember(recPair(lValue, rValue)))
+                  } else {
+                    // Use the RHS/patch value and recursively remove Null or hidden fields:
+                    kvs(kvsIdx) = (key, createLazyMember(recSingle(rValue)))
+                  }
+                }
+              } else {
+                // Use the RHS/patch value and recursively remove Null or hidden fields:
+                kvs(kvsIdx) = (key, createLazyMember(recSingle(rValue)))
+              }
+              kvsIdx += 1
+            }
+            i += 1
+          }
+
+          val trimmedKvs = if (kvsIdx == i) kvs else kvs.slice(0, kvsIdx)
+          Val.Obj.mk(mergePosition, trimmedKvs)
+
+        case (_, _) => recSingle(r)
+      }
+      def recSingle(v: Val): Val = v match {
+        case obj: Val.Obj =>
+          val keys: Array[String] = obj.visibleKeyNames
+          val kvs: Array[(String, Val.Obj.Member)] =
+            new Array[(String, Val.Obj.Member)](keys.length)
+          var kvsIdx = 0
+          var i = 0
+          while (i < keys.length) {
+            val key = keys(i)
+            val value = obj.value(key, pos, obj)(ev)
+            if (!value.isInstanceOf[Val.Null]) {
+              kvs(kvsIdx) = (key, createLazyMember(recSingle(value)))
+              kvsIdx += 1
+            }
+            i += 1
+          }
+          val trimmedKvs = if (kvsIdx == i) kvs else kvs.slice(0, kvsIdx)
+          Val.Obj.mk(obj.pos, trimmedKvs)
+
+        case _ => v
+      }
+      def distinctKeys(lKeys: Array[String], rKeys: Array[String]): Array[String] = {
+        // Fast path for small RHS size (the common case when merging a small
+        // patch into a large target object), avoiding the cost of constructing
+        // and probing a hash set: instead, perform a nested loop where the LHS
+        // is scanned and matching RHS entries are marked as null to be skipped.
+        // Via local microbenchmarks simulating a "worst-case" (RHS keys all new),
+        // the threshold of `8` was empirically determined to be a good tradeoff
+        // between allocation + hashing costs vs. nested loop array scans.
+        if (rKeys.length <= 8) {
+          val rKeysCopy = new Array[String](rKeys.length)
+          rKeys.copyToArray(rKeysCopy)
+          var i = 0
+          var numNewRKeys = rKeysCopy.length
+          while (i < lKeys.length) {
+            val lKey = lKeys(i)
+            var j = 0
+            while (j < rKeysCopy.length) {
+              // This LHS key is in the RHS, so mark it to be skipped in output:
+              if (lKey == rKeysCopy(j)) {
+                rKeysCopy(j) = null
+                numNewRKeys -= 1
+              }
+              j += 1
+            }
+            i += 1
+          }
+          // Combine lKeys with non-null elements of rKeysCopy:
+          if (numNewRKeys == 0) {
+            lKeys
+          } else {
+            val outArray = new Array[String](lKeys.length + numNewRKeys)
+            System.arraycopy(lKeys, 0, outArray, 0, lKeys.length)
+            var outIdx = lKeys.length
+            var j = 0
+            while (j < rKeysCopy.length) {
+              if (rKeysCopy(j) != null) {
+                outArray(outIdx) = rKeysCopy(j)
+                outIdx += 1
+              }
+              j += 1
+            }
+            outArray
+          }
+        } else {
+          // Fallback: Use hash-based deduplication for large RHS arrays:
+          (lKeys ++ rKeys).distinct
+        }
+      }
+      recPair(target.force, patch.force)
+    }
+  }
+
   private object ManifestJson extends Val.Builtin1("manifestJson", "v") {
     def evalRhs(v: Lazy, ev: EvalScope, pos: Position): Val =
       Val.Str(pos, Materializer.apply0(v.force, MaterializeJsonRenderer())(ev).toString)
@@ -1082,123 +1202,7 @@ class Std(
     builtin(Foldl),
     builtin(Foldr),
     builtin(Range),
-    builtin("mergePatch", "target", "patch") { (pos, ev, target: Val, patch: Val) =>
-      val mergePosition = pos
-      def createLazyMember(v: => Val) = new Val.Obj.Member(false, Visibility.Normal) {
-        def invoke(self: Val.Obj, sup: Val.Obj, fs: FileScope, ev: EvalScope): Val = v
-      }
-      def recPair(l: Val, r: Val): Val = (l, r) match {
-        case (l: Val.Obj, r: Val.Obj) =>
-          val keys: Array[String] = distinctKeys(l.visibleKeyNames, r.visibleKeyNames)
-          val kvs: Array[(String, Val.Obj.Member)] =
-            new Array[(String, Val.Obj.Member)](keys.length)
-          var kvsIdx = 0
-          var i = 0
-          while (i < keys.length) {
-            val key = keys(i)
-            val rValue = if (r.containsVisibleKey(key)) r.valueRaw(key, r, pos)(ev) else null
-            if (!rValue.isInstanceOf[Val.Null]) { // if we are not removing the key
-              if (l.containsVisibleKey(key)) {
-                if (rValue == null) {
-                  // Preserve the LHS/target value:
-                  kvs(kvsIdx) = (key, createLazyMember(l.valueRaw(key, l, pos)(ev)))
-                } else {
-                  // Below, lValue is lazy so that we can short circuit and skip its
-                  // evaluation when rValue is not an object:
-                  lazy val lValue = l.valueRaw(key, l, pos)(ev)
-                  if (rValue.isInstanceOf[Val.Obj] && lValue.isInstanceOf[Val.Obj]) {
-                    // Recursively merge objects:
-                    kvs(kvsIdx) = (key, createLazyMember(recPair(lValue, rValue)))
-                  } else {
-                    // Use the RHS/patch value and recursively remove Null or hidden fields:
-                    kvs(kvsIdx) = (key, createLazyMember(recSingle(rValue)))
-                  }
-                }
-              } else {
-                // Use the RHS/patch value and recursively remove Null or hidden fields:
-                kvs(kvsIdx) = (key, createLazyMember(recSingle(rValue)))
-              }
-              kvsIdx += 1
-            }
-            i += 1
-          }
-
-          val trimmedKvs = if (kvsIdx == i) kvs else kvs.slice(0, kvsIdx)
-          Val.Obj.mk(mergePosition, trimmedKvs)
-
-        case (_, _) => recSingle(r)
-      }
-      def recSingle(v: Val): Val = v match {
-        case obj: Val.Obj =>
-          val keys: Array[String] = obj.visibleKeyNames
-          val kvs: Array[(String, Val.Obj.Member)] =
-            new Array[(String, Val.Obj.Member)](keys.length)
-          var kvsIdx = 0
-          var i = 0
-          while (i < keys.length) {
-            val key = keys(i)
-            val value = obj.value(key, pos, obj)(ev)
-            if (!value.isInstanceOf[Val.Null]) {
-              kvs(kvsIdx) = (key, createLazyMember(recSingle(value)))
-              kvsIdx += 1
-            }
-            i += 1
-          }
-          val trimmedKvs = if (kvsIdx == i) kvs else kvs.slice(0, kvsIdx)
-          Val.Obj.mk(obj.pos, trimmedKvs)
-
-        case _ => v
-      }
-      def distinctKeys(lKeys: Array[String], rKeys: Array[String]): Array[String] = {
-        // Fast path for small RHS size (the common case when merging a small
-        // patch into a large target object), avoiding the cost of constructing
-        // and probing a hash set: instead, perform a nested loop where the LHS
-        // is scanned and matching RHS entries are marked as null to be skipped.
-        // Via local microbenchmarks simulating a "worst-case" (RHS keys all new),
-        // the threshold of `8` was empirically determined to be a good tradeoff
-        // between allocation + hashing costs vs. nested loop array scans.
-        if (rKeys.length <= 8) {
-          val rKeysCopy = new Array[String](rKeys.length)
-          rKeys.copyToArray(rKeysCopy)
-          var i = 0
-          var numNewRKeys = rKeysCopy.length
-          while (i < lKeys.length) {
-            val lKey = lKeys(i)
-            var j = 0
-            while (j < rKeysCopy.length) {
-              // This LHS key is in the RHS, so mark it to be skipped in output:
-              if (lKey == rKeysCopy(j)) {
-                rKeysCopy(j) = null
-                numNewRKeys -= 1
-              }
-              j += 1
-            }
-            i += 1
-          }
-          // Combine lKeys with non-null elements of rKeysCopy:
-          if (numNewRKeys == 0) {
-            lKeys
-          } else {
-            val outArray = new Array[String](lKeys.length + numNewRKeys)
-            System.arraycopy(lKeys, 0, outArray, 0, lKeys.length)
-            var outIdx = lKeys.length
-            var j = 0
-            while (j < rKeysCopy.length) {
-              if (rKeysCopy(j) != null) {
-                outArray(outIdx) = rKeysCopy(j)
-                outIdx += 1
-              }
-              j += 1
-            }
-            outArray
-          }
-        } else {
-          // Fallback: Use hash-based deduplication for large RHS arrays:
-          (lKeys ++ rKeys).distinct
-        }
-      }
-      recPair(target.force, patch.force)
-    },
+    builtin(MergePatch),
     builtin("sqrt", "x") { (pos, ev, x: Double) =>
       math.sqrt(x)
     },
