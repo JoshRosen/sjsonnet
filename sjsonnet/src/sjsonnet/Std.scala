@@ -1023,7 +1023,13 @@ class Std(
           (lKeys ++ rKeys).distinct
         }
       }
-      recPair(target.force, patch.force)
+      // Only evaluate the target if the patch is an object:
+      patch.force match {
+        case patchObj: Val.Obj =>
+          recPair(target.force, patchObj)
+        case patchNonObj =>
+          recSingle(patchNonObj)
+      }
     }
   }
 
