@@ -10,6 +10,14 @@ object ArrayModule extends AbstractFunctionModule {
 
   private val dummyPos: Position = new Position(null, 0)
 
+  /** Validate that a value is boolean, matching official Jsonnet error format */
+  private def requireBoolean(v: Val, pos: Position)(implicit ev: EvalScope): Boolean = v match {
+    case _: Val.True  => true
+    case _: Val.False => false
+    case other        =>
+      Error.fail(s"filter function must return boolean, got: ${other.prettyName}", pos)
+  }
+
   private object MinArray
       extends Val.Builtin(
         "minArray",
@@ -102,12 +110,12 @@ object ArrayModule extends AbstractFunctionModule {
       val func = _func.force.asFunc
       if (func.isInstanceOf[Val.Builtin] || func.params.names.length != 1) {
         while (i < a.length) {
-          if (!func.apply1(a(i), p)(ev, TailstrictModeDisabled).isInstanceOf[Val.True]) {
+          if (!requireBoolean(func.apply1(a(i), p)(ev, TailstrictModeDisabled), p)(ev)) {
             var b = new Array[Lazy](a.length - 1)
             System.arraycopy(a, 0, b, 0, i)
             var j = i + 1
             while (j < a.length) {
-              if (func.apply1(a(j), p)(ev, TailstrictModeDisabled).isInstanceOf[Val.True]) {
+              if (requireBoolean(func.apply1(a(j), p)(ev, TailstrictModeDisabled), p)(ev)) {
                 b(i) = a(j)
                 i += 1
               }
@@ -129,13 +137,13 @@ object ArrayModule extends AbstractFunctionModule {
         val scopeIdx = newScope.length - 1
         while (i < a.length) {
           newScope.bindings(scopeIdx) = a(i)
-          if (!func.evalRhs(newScope, ev, funDefFileScope, p).isInstanceOf[Val.True]) {
+          if (!requireBoolean(func.evalRhs(newScope, ev, funDefFileScope, p), p)(ev)) {
             var b = new Array[Lazy](a.length - 1)
             System.arraycopy(a, 0, b, 0, i)
             var j = i + 1
             while (j < a.length) {
               newScope.bindings(scopeIdx) = a(j)
-              if (func.evalRhs(newScope, ev, funDefFileScope, p).isInstanceOf[Val.True]) {
+              if (requireBoolean(func.evalRhs(newScope, ev, funDefFileScope, p), p)(ev)) {
                 b(i) = a(j)
                 i += 1
               }
@@ -409,10 +417,11 @@ object ArrayModule extends AbstractFunctionModule {
           arr.asLazyArray.flatMap { i =>
             i.force
             if (
-              !filter_func
-                .apply1(i, pos.noOffset)(ev, TailstrictModeDisabled)
-                .isInstanceOf[Val.True]
-            ) None
+              !requireBoolean(filter_func.apply1(i, pos.noOffset)(ev, TailstrictModeDisabled), pos)(
+                ev
+              )
+            )
+              None
             else Some[Lazy](() => map_func.apply1(i, pos.noOffset)(ev, TailstrictModeDisabled))
           }
         )

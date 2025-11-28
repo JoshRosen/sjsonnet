@@ -331,12 +331,16 @@ class Evaluator(
   }
 
   def visitAssert(e: AssertExpr)(implicit scope: ValScope): Val = {
-    if (!visitExpr(e.asserted.value).isInstanceOf[Val.True]) {
-      e.asserted.msg match {
-        case null => Error.fail("Assertion failed", e)
-        case msg  =>
-          Error.fail("Assertion failed: " + materializeError(visitExpr(msg)), e)
-      }
+    visitExpr(e.asserted.value) match {
+      case Val.True(_)  => // assertion passed
+      case Val.False(_) =>
+        e.asserted.msg match {
+          case null => Error.fail("Assertion failed", e)
+          case msg  =>
+            Error.fail("Assertion failed: " + materializeError(visitExpr(msg)), e)
+        }
+      case v =>
+        Error.fail("Assertion condition must be boolean, got: " + v.prettyName, e)
     }
     visitExpr(e.returned)
   }
@@ -684,16 +688,24 @@ class Evaluator(
       var i = 0
       while (i < asserts.length) {
         val a = asserts(i)
-        if (!visitExpr(a.value)(newScope).isInstanceOf[Val.True]) {
-          a.msg match {
-            case null => Error.fail("Assertion failed", a.value.pos, "Assert")
-            case msg  =>
-              Error.fail(
-                "Assertion failed: " + visitExpr(msg)(newScope).cast[Val.Str].value,
-                a.value.pos,
-                "Assert"
-              )
-          }
+        visitExpr(a.value)(newScope) match {
+          case Val.True(_)  => // assertion passed
+          case Val.False(_) =>
+            a.msg match {
+              case null => Error.fail("Assertion failed", a.value.pos, "Assert")
+              case msg  =>
+                Error.fail(
+                  "Assertion failed: " + visitExpr(msg)(newScope).cast[Val.Str].value,
+                  a.value.pos,
+                  "Assert"
+                )
+            }
+          case v =>
+            Error.fail(
+              "Assertion condition must be boolean, got: " + v.prettyName,
+              a.value.pos,
+              "Assert"
+            )
         }
         i += 1
       }

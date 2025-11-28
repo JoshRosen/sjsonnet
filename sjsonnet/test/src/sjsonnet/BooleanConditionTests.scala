@@ -6,8 +6,8 @@ import TestUtils.{eval, evalErr}
 /**
  * Tests for proper boolean validation in conditions.
  *
- * These test cases verify that sjsonnet properly rejects non-boolean values
- * in contexts that require booleans, matching the behavior of official Jsonnet.
+ * These test cases verify that sjsonnet properly rejects non-boolean values in contexts that
+ * require booleans, matching the behavior of official Jsonnet.
  *
  * See: https://github.com/google/jsonnet/blob/master/doc/ref/spec.html
  */
