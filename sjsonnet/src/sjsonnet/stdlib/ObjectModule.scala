@@ -100,11 +100,14 @@ object ObjectModule extends AbstractFunctionModule {
     def evalRhs(_func: Lazy, _obj: Lazy, ev: EvalScope, pos: Position): Val = {
       val func = _func.force.asFunc
       val obj = _obj.force.asObj
-      val allKeys = obj.allKeyNames
-      val m = Util.preSizedJavaLinkedHashMap[String, Val.Obj.Member](allKeys.length)
+      // Use visibleKeyNames to match the behavior of std.objectFields, which excludes hidden fields.
+      // This matches the official jsonnet stdlib definition:
+      //   mapWithKey(func, obj):: { [k]: func(k, obj[k]) for k in std.objectFields(obj) }
+      val keys = obj.visibleKeyNames
+      val m = Util.preSizedJavaLinkedHashMap[String, Val.Obj.Member](keys.length)
       var i = 0
-      while (i < allKeys.length) {
-        val k = allKeys(i)
+      while (i < keys.length) {
+        val k = keys(i)
         val v = new Val.Obj.Member(false, Visibility.Normal, deprecatedSkipAsserts = true) {
           def invoke(self: Val.Obj, sup: Val.Obj, fs: FileScope, ev: EvalScope): Val =
             func.apply2(Val.Str(pos, k), () => obj.value(k, pos.noOffset)(ev), pos.noOffset)(
@@ -115,7 +118,7 @@ object ObjectModule extends AbstractFunctionModule {
         m.put(k, v)
         i += 1
       }
-      val valueCache = Val.Obj.getEmptyValueCacheForObjWithoutSuper(allKeys.length)
+      val valueCache = Val.Obj.getEmptyValueCacheForObjWithoutSuper(keys.length)
       new Val.Obj(pos, m, false, null, null, valueCache)
     }
   }
